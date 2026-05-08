@@ -1,10 +1,21 @@
 import logging
+import math
 from typing import List
 
 from scipy.stats import beta as beta_dist
 
 from app.core.config import settings
 from app.pipeline.models import DocumentEnrichedAsset, DocumentScoredAsset
+
+
+def _safe_float(value, default: float = 0.5) -> float:
+    try:
+        f = float(value)
+    except (TypeError, ValueError):
+        return default
+    if math.isnan(f) or math.isinf(f):
+        return default
+    return max(0.0, min(1.0, f))
 
 logger = logging.getLogger(__name__)
 
@@ -75,17 +86,20 @@ def _confidence_tier(score: float) -> str:
 
 def _compute_confidence(asset: DocumentEnrichedAsset) -> tuple[float, dict]:
     signals = {
-        "evidence_strength": _evidence_strength(asset),
-        "address_specificity": _address_specificity(asset),
-        "coordinate_source": _coordinate_source(asset),
-        "name_quality": _name_quality(asset),
-        "llm_confidence": asset.llm_confidence,
+        "evidence_strength": _safe_float(_evidence_strength(asset)),
+        "address_specificity": _safe_float(_address_specificity(asset)),
+        "coordinate_source": _safe_float(_coordinate_source(asset)),
+        "name_quality": _safe_float(_name_quality(asset)),
+        "llm_confidence": _safe_float(asset.llm_confidence),
     }
 
     raw = sum(SIGNALS_WEIGHTS_DOC[key] * signals[key] for key in SIGNALS_WEIGHTS_DOC)
+    raw = _safe_float(raw)
     alpha = 1 + raw * 10
     beta_param = 1 + (1 - raw) * 10
-    return round(beta_dist.mean(alpha, beta_param), 3), {k: round(v, 3) for k, v in signals.items()}
+    score = float(beta_dist.mean(alpha, beta_param))
+    score = _safe_float(score)
+    return round(score, 3), {k: round(v, 3) for k, v in signals.items()}
 
 
 async def score_document_assets(
