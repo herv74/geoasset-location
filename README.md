@@ -2,7 +2,7 @@
 
 > **Proyecto:** Caso II — Aplicación de IA a la Geolocalización de Activos Productivos  
 > **Contexto académico:** Trabajo de Fin de Máster (TFM)  
-> **Stack:** Vue 3 · FastAPI · Docker · LiteLLM · AWS Bedrock · Google Maps API · PostgreSQL · Redis · CrewAI
+> **Stack:** Vue 3 · FastAPI · Docker · LiteLLM · OpenAI gpt-4o-mini · Google Maps API · PostgreSQL · Redis · CrewAI
 
 ---
 
@@ -58,7 +58,7 @@ El sistema responde a una necesidad real en contextos de análisis de inversión
 │                                                                     │
 │  ┌─────────────────────────────────────────────────────────────┐   │
 │  │                       Data Layer                             │   │
-│  │   Google Maps API · PostgreSQL · Redis · AWS Bedrock (LLM)  │   │
+│  │   Google Maps API · PostgreSQL · Redis · OpenAI (LLM)       │   │
 │  └─────────────────────────────────────────────────────────────┘   │
 └─────────────────────────────────────────────────────────────────────┘
                              │
@@ -79,8 +79,8 @@ El sistema responde a una necesidad real en contextos de análisis de inversión
 | Mapa | Leaflet.js + OpenStreetMap + leaflet.markercluster | Visualización geoespacial interactiva |
 | Backend | FastAPI (Python 3.11+) | Async nativo, tipado, OpenAPI automático |
 | Streaming | Server-Sent Events (SSE) | Progreso en tiempo real sin WebSocket |
-| LLM Gateway | LiteLLM | Abstracción multi-proveedor |
-| LLM Provider | AWS Bedrock | Modelos GPT-oss y Claude vía Bedrock |
+| LLM Gateway | LiteLLM | Abstracción multi-proveedor (OpenAI por defecto; Bedrock/Azure/Anthropic configurables vía env) |
+| LLM Provider | OpenAI `gpt-4o-mini` | Modelo canónico de los 3 pipelines |
 | Agente IA | CrewAI + DuckDuckGo MCP | Búsqueda web autónoma de documentos |
 | Document parsing | Docling | Extracción de texto de PDF/DOCX/PPTX |
 | Maps/Places | Google Maps Places API v2 | Fuente principal de activos geolocalizados |
@@ -557,20 +557,26 @@ geoasset-location/
 
 ```env
 GOOGLE_MAPS_API_KEY=          # Google Maps Places API v2 + Geocoding API
-AWS_ACCESS_KEY_ID=            # Acceso a AWS Bedrock (LLMs)
-AWS_SECRET_ACCESS_KEY=        # Acceso a AWS Bedrock (LLMs)
-AWS_REGION_NAME=eu-west-1     # Región Bedrock
+OPENAI_API_KEY=               # API key de OpenAI (provider LLM por defecto)
+
+# Opcional — para usar AWS Bedrock en lugar de OpenAI, descomenta:
+# AWS_ACCESS_KEY_ID=
+# AWS_SECRET_ACCESS_KEY=
+# AWS_REGION_NAME=eu-west-1
 ```
 
 ### Configuración — valores por defecto funcionales (`.env.defaults`)
 
 ```env
-# Modelos LLM (via LiteLLM + AWS Bedrock)
-LITELLM_MODEL=bedrock/openai.gpt-oss-120b-1:0
+# Modelos LLM (via LiteLLM)
+# Provider canónico: OpenAI gpt-4o-mini. Para cambiar a Bedrock/Azure/
+# Anthropic, sobreescribe estos tres en .env.secrets (p.ej.
+# bedrock/openai.gpt-oss-120b-1:0) — la capa LiteLLM hace el resto.
+LITELLM_MODEL=openai/gpt-4o-mini
 LITELLM_FALLBACK_MODEL=
-PIPELINE_LITELLM_MODEL=bedrock/openai.gpt-oss-120b-1:0
+PIPELINE_LITELLM_MODEL=openai/gpt-4o-mini
 PIPELINE_LITELLM_FALLBACK_MODEL=
-AGENT_LITELLM_MODEL=bedrock/eu.anthropic.claude-haiku-4-5-20251001-v1:0
+AGENT_LITELLM_MODEL=openai/gpt-4o-mini
 AGENT_LITELLM_FALLBACK_MODEL=
 LITELLM_MAX_WORKERS=5
 LITELLM_TIMEOUT=30
@@ -618,14 +624,15 @@ BACKEND_NUM_WORKERS=1
 
 - Docker + Docker Compose
 - Credenciales de Google Maps API (Places + Geocoding activadas)
-- Credenciales AWS con acceso a Bedrock en `eu-west-1`
+- API key de OpenAI (provider LLM por defecto)
+  - *Alternativa*: credenciales AWS con acceso a Bedrock en `eu-west-1` si prefieres ese proveedor (sobreescribir modelos en `.env.secrets`).
 
 ### Con Docker (recomendado)
 
 ```bash
 # 1. Copiar plantilla de secretos y rellenar con valores reales
 cp .env.secrets_defaults .env.secrets
-# Editar .env.secrets con GOOGLE_MAPS_API_KEY, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY
+# Editar .env.secrets con GOOGLE_MAPS_API_KEY y OPENAI_API_KEY
 
 # 2. Arrancar (producción)
 ./run.sh
@@ -670,8 +677,8 @@ En cumplimiento de los requisitos del TFM, el proyecto sigue las fases estableci
 - Establecimiento de criterios de calidad mínimos por caso de uso y fuente.
 
 ### 12.2 Selección y Diseño del Modelo
-- LLMs de propósito general vía AWS Bedrock (GPT-oss-120b para filtrado/enriquecimiento, Claude Haiku para el agente).
-- Abstracción multi-proveedor vía LiteLLM para desacoplamiento del modelo concreto.
+- LLM de propósito general: OpenAI `gpt-4o-mini` para los 3 pipelines (filtrado/clasificación Maps, extracción documental y agente CrewAI). Elegido por relación coste/latencia/calidad en tareas estructuradas con esquema JSON.
+- Abstracción multi-proveedor vía LiteLLM: cambiar a AWS Bedrock (`bedrock/openai.gpt-oss-120b-1:0`, `bedrock/eu.anthropic.claude-haiku-4-5-...`), Azure OpenAI o Anthropic directo sólo requiere sobreescribir `LITELLM_MODEL`, `AGENT_LITELLM_MODEL` y `PIPELINE_LITELLM_MODEL` en `.env.secrets`, sin tocar código.
 - Diseño de prompts: prompt engineering con esquema JSON estricto, ejemplos few-shot y versioning en `.yaml`.
 - Agente autónomo con CrewAI + herramientas especializadas (búsqueda web + descarga validada).
 
