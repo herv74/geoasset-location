@@ -2,7 +2,7 @@
 
 > **Proyecto:** Caso II — Aplicación de IA a la Geolocalización de Activos Productivos  
 > **Contexto académico:** Trabajo de Fin de Máster (TFM)  
-> **Stack:** Vue 3 · FastAPI · Docker · LiteLLM · Google Maps API · PostgreSQL · CrewAI
+> **Stack:** Vue 3 · FastAPI · Docker · LiteLLM · AWS Bedrock · Google Maps API · PostgreSQL · Redis · CrewAI
 
 ---
 
@@ -102,13 +102,13 @@ El sistema permite tres formas de localizar activos, combinables entre sí:
 El usuario escribe el nombre de una empresa. El backend lanza queries paralelas a la Google Places API y filtra y enriquece los resultados con LLMs.
 
 ### 3.2 Subida de Documento
-El usuario sube un PDF, DOCX o PPTX (máximo 25 MB). El pipeline extrae, geocodifica y puntúa los activos mencionados en el documento.
+El usuario sube un PDF, DOCX o PPTX (máximo 25 MB, configurable vía `UPLOAD_MAX_SIZE_MB`). El pipeline extrae, geocodifica y puntúa los activos mencionados en el documento.
 
 ### 3.3 Búsqueda con Agente IA
 El usuario activa el modo agente. Un agente CrewAI busca en la web documentos corporativos relevantes (informes anuales, memorias, presentaciones) usando DuckDuckGo. El usuario revisa y selecciona los documentos encontrados, que luego se procesan con el pipeline de documento.
 
 ### 3.4 Modo Combinado
-Los modos Maps y Documento pueden usarse de forma combinada. Los activos se deduplicaban por ID y se muestran conjuntamente en el mapa, con indicador de fuente por activo (`data_sources`).
+Los modos Maps y Documento pueden usarse de forma combinada (search bar con texto **y** documento adjunto en la misma petición). Los activos se deduplican por `id` en el store del frontend (`appendAssets`) y se muestran conjuntamente en el mapa, con indicador de fuente por activo (`data_sources`).
 
 ---
 
@@ -258,7 +258,7 @@ Usuario activa modo agente para una empresa
                   para cada fichero seleccionado
 ```
 
-Los documentos procesados por el agente pasan exactamente por el mismo pipeline de 6 pasos que un documento subido manualmente. El campo `data_sources` del activo resultante indica la procedencia (`agent_search` o `document_upload`).
+Los documentos procesados por el agente pasan exactamente por el mismo pipeline de 6 pasos que un documento subido manualmente. El campo `data_sources` del activo resultante refleja el procesamiento real: `["document_upload", "llm_inference"]`. La fuente `agent_search` está definida como valor reservado en la taxonomía pero su asignación automática a los activos producidos por el agente es una mejora pendiente del pipeline (`agent_orchestrator.py`).
 
 ---
 
@@ -385,7 +385,11 @@ class Asset:
     google_place_id: str
     confidence_score: float          # 0.0 – 1.0 (distribución Beta)
     confidence_tier: str             # "HIGH" | "MEDIUM" | "LOW"
-    data_sources: List[str]          # ["maps_api", "document_upload", "agent_search", "llm_inference"]
+    data_sources: List[str]          # Valores reales asignados por el sistema:
+                                     #   pipeline Maps      → ["maps_api", "llm_inference"]
+                                     #   pipeline Documento → ["document_upload", "llm_inference"]
+                                     #   "agent_search" está reservado en la taxonomía pero
+                                     #   no se asigna automáticamente en la implementación actual
 
     # Contacto
     website: Optional[str]
@@ -442,7 +446,7 @@ Pantalla de carga mientras corre el pipeline:
 
 **Panel lateral izquierdo (`AssetSidebar`):**
 - Nombre de la empresa y resumen: total de activos, desglose por categoría y nivel de confianza.
-- Lista de activos con búsqueda, filtro por categoría, filtro por nivel de confianza y filtro por fuente (`maps_api`, `document_upload`, `agent_search`).
+- Lista de activos con búsqueda, filtro por categoría (super-categoría y subcategoría), slider de confianza mínima y chips de filtro por fuente; los chips se generan dinámicamente a partir de las fuentes realmente presentes en `data_sources` (típicamente `maps_api` y/o `document_upload`).
 - Botones de exportación: **CSV** (UTF-8 con BOM para Excel) y **Excel** (.xlsx via SheetJS).
 - Botón "Nueva búsqueda" para volver al inicio.
 
@@ -683,9 +687,9 @@ En cumplimiento de los requisitos del TFM, el proyecto sigue las fases estableci
 - Streaming SSE en todos los pipelines para retroalimentación en tiempo real al usuario.
 
 ### 12.5 Evaluación y Validación
-- Métricas automáticas: precision, recall, F1 sobre dataset de ground truth.
-- Evaluación del score de confianza: calibración del `confidence_score` vs. acierto real.
-- Tests con pytest; tests de integración LLM marcados con `@pytest.mark.llm` y activables con `--llm`.
+- Validación funcional end-to-end del sistema sobre empresas reales (Inditex, Repsol, Iberdrola, Mercadona) cubriendo los 3 pipelines, el dashboard, el detalle de scoring y la exportación.
+- Inspección manual del `confidence_score` y `confidence_tier` para verificar la calibración del scoring sobre activos conocidos.
+- Infraestructura de tests preparada (`backend/tests/conftest.py` con setup pytest); la suite de tests unitarios automatizados con pytest queda como línea de mejora pendiente, junto al cálculo numérico de precision/recall sobre un ground truth público.
 
 ### 12.6 Despliegue y Monitorización
 - Contenerización completa con Docker Compose (4 servicios).
