@@ -9,6 +9,14 @@ nginx/
 
 /.vscode
 
+# TFM memory artifacts must not live in this repo
+/capturas_tfm/
+/memoria/
+*.pptx
+*.pdf
+DOCUMENT_PROCESSING_IMPLEMENTATION_PLAN.md
+generate_ppt*.py
+
 
 
 
